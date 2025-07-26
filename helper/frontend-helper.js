@@ -3,6 +3,7 @@ const cors = require('cors');
 const fs = require('fs');
 const ping = require('ping');
 const Bonjour = require('bonjour');
+const axios = require('axios');
 
 const bonjour = Bonjour();
 const app = express();
@@ -37,6 +38,9 @@ bonjour.find({ type: 'circos' }, service => {
     lastSeen: new Date().toISOString(),
     lastPing: null,
     lastRtt: null,
+    uptime: null,
+    hostname: null,
+    version: null,
     pingHistory: []
   };
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
@@ -48,7 +52,6 @@ async function updatePings() {
   if (!ips.length) return;
 
   console.log(`[PING] Checking ${ips.length} cached machines...`);
-
   let updated = false;
 
   for (const ip of ips) {
@@ -56,20 +59,31 @@ async function updatePings() {
       const res = await ping.promise.probe(ip);
       if (res.alive) {
         const now = new Date().toISOString();
+        const rtt = res.time;
 
-        // Init fields if not present
         if (!machineCache[ip].pingHistory) machineCache[ip].pingHistory = [];
 
         machineCache[ip].lastSeen = now;
         machineCache[ip].lastPing = now;
-        machineCache[ip].lastRtt = res.time;
-
+        machineCache[ip].lastRtt = rtt;
         machineCache[ip].pingHistory.push(now);
         if (machineCache[ip].pingHistory.length > 10) {
-          machineCache[ip].pingHistory.shift(); // Keep last 10 entries
+          machineCache[ip].pingHistory.shift();
         }
 
-        console.log(`[PING] ${ip} alive. RTT ${res.time} ms. Updated.`);
+        // Try to fetch metadata from /ping
+        try {
+          const pingRes = await axios.get(`http://${ip}:9000/ping`, { timeout: 1000 });
+          const info = pingRes.data;
+
+          machineCache[ip].uptime = info.uptime ?? null;
+          machineCache[ip].hostname = info.hostname ?? null;
+          machineCache[ip].version = info.version ?? null;
+        } catch (e) {
+          console.warn(`[PING] /ping request to ${ip} failed: ${e.message}`);
+        }
+
+        console.log(`[PING] ${ip} alive. RTT ${rtt} ms. Updated.`);
         updated = true;
       } else {
         console.log(`[PING] ${ip} is not responding.`);
@@ -105,11 +119,28 @@ app.post('/cache', (req, res) => {
     lastSeen: new Date().toISOString(),
     lastPing: null,
     lastRtt: null,
+    uptime: null,
+    hostname: null,
+    version: null,
     pingHistory: []
   };
 
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
   res.json({ success: true });
+});
+
+// ✅ NEW: Proxy service status from each backend
+app.get('/services/:ip', async (req, res) => {
+  const ip = req.params.ip;
+  const port = machineCache[ip]?.port || 9000;
+
+  try {
+    const response = await axios.get(`http://${ip}:${port}/status`, { timeout: 1000 });
+    res.json(response.data);
+  } catch (err) {
+    console.warn(`[SERVICES] Failed to fetch status from ${ip}:${port} — ${err.message}`);
+    res.status(500).json({ error: 'Failed to fetch status' });
+  }
 });
 
 app.listen(PORT, () => {

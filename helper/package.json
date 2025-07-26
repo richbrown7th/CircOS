@@ -1,0 +1,14 @@
+{
+  "name": "circos-helper",
+  "version": "1.0.0",
+  "description": "CircOS frontend helper for mDNS + cache",
+  "main": "frontend-helper.js",
+  "scripts": {
+    "start": "node frontend-helper.js"
+  },
+  "dependencies": {
+    "bonjour": "^3.5.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  }
+}

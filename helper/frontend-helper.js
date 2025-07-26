@@ -1,38 +1,60 @@
 const express = require('express');
-const mdns = require('multicast-dns')();
+const cors = require('cors');
 const fs = require('fs');
-const path = require('path');
+const bonjour = require('bonjour')();
 
 const app = express();
-const PORT = 3050;
-const CACHE_FILE = path.join(__dirname, 'machine_cache.json');
+const PORT = 8800;
 
-let cache = {};
+const CACHE_FILE = './machine_cache.json';
+let machineCache = {};
+
+// Load machine cache
 if (fs.existsSync(CACHE_FILE)) {
-  cache = JSON.parse(fs.readFileSync(CACHE_FILE));
+  try {
+    machineCache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+  } catch (err) {
+    console.error('[CACHE] Failed to load machine cache:', err.message);
+  }
 }
 
-function updateCache(host, ip) {
-  cache[host] = { ip, lastSeen: new Date().toISOString() };
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
-}
-
-mdns.on('response', function(response) {
-  response.answers.forEach(a => {
-    if (a.type === 'A') {
-      updateCache(a.name, a.data);
-    }
-  });
+// Start mDNS discovery
+bonjour.find({ type: 'circos' }, service => {
+  const ip = service.referer.address;
+  if (!machineCache[ip]) {
+    console.log('[mDNS] Discovered:', ip);
+    machineCache[ip] = {
+      name: service.name || 'Unnamed',
+      address: ip,
+      port: service.port || 9000,
+      lastSeen: new Date().toISOString()
+    };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  }
 });
 
-app.get('/discover', (req, res) => {
-  res.json(cache);
-});
+app.use(cors());
+app.use(express.json());
 
+// GET machine cache
 app.get('/cache', (req, res) => {
-  res.json(cache);
+  res.json(machineCache);
+});
+
+// POST to add manual machine
+app.post('/cache', (req, res) => {
+  const { address, name, port } = req.body;
+  if (!address) return res.status(400).json({ error: 'Address required' });
+  machineCache[address] = {
+    name: name || 'Manual',
+    address,
+    port: port || 9000,
+    lastSeen: new Date().toISOString()
+  };
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  res.json({ success: true });
 });
 
 app.listen(PORT, () => {
-  console.log(`Frontend helper running at http://localhost:${PORT}`);
+  console.log(`[helper] Listening on http://localhost:${PORT}`);
 });

@@ -1,0 +1,26 @@
+.status-banner {
+  padding: 10px;
+  font-weight: bold;
+  font-size: 18px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.status-green {
+  background-color: #e0f8e9;
+  color: #1a7f3c;
+  border: 1px solid #1a7f3c;
+}
+
+.status-orange {
+  background-color: #fff7e0;
+  color: #a97400;
+  border: 1px solid #a97400;
+}
+
+.status-red {
+  background-color: #ffe5e5;
+  color: #a60000;
+  border: 1px solid #a60000;
+}

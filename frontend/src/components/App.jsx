@@ -1,111 +1,96 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import "./App.css";
 
 function App() {
-  const [cache, setCache] = useState({});
-  const [services, setServices] = useState({});
+  const [machines, setMachines] = useState({});
 
   useEffect(() => {
-    fetchData(); // initial fetch
-    const interval = setInterval(fetchData, 10000); // every 10s
+    const fetchData = async () => {
+      try {
+        const res = await axios.get("http://localhost:8800/cache");
+        const updated = {};
+
+        Object.entries(res.data).forEach(([ip, data]) => {
+          const isReachable =
+            data.lastPing &&
+            Date.now() - new Date(data.lastPing).getTime() < 120_000;
+
+          updated[ip] = {
+            ...data,
+            connected:
+              data.connected !== undefined
+                ? data.connected
+                : isReachable &&
+                  data.uptime !== null &&
+                  data.hostname !== null,
+          };
+        });
+
+        setMachines(updated);
+      } catch (err) {
+        console.error("[UI] Failed to load cache:", err.message);
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchData = async () => {
-    try {
-      const res = await axios.get('http://localhost:8800/cache');
-      const data = res.data;
-      setCache(data);
+  // Summary status
+  const machineList = Object.values(machines);
+  const connectedCount = machineList.filter(m => m.connected).length;
 
-      // For each IP, get services
-      for (const ip of Object.keys(data)) {
-        try {
-          const serviceRes = await axios.get(`http://localhost:8800/services/${ip}`);
-          setServices(prev => ({ ...prev, [ip]: serviceRes.data }));
-        } catch (e) {
-          console.warn(`No service info from ${ip}`);
-          setServices(prev => ({ ...prev, [ip]: null }));
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch cache:', err);
-    }
-  };
+  let statusText = "Disconnected";
+  let statusClass = "status-red";
 
-  const groupByHost = (data) => {
-    const grouped = {};
-    for (const ip in data) {
-      const entry = data[ip];
-      const name = entry.name || 'Unnamed';
-      if (!grouped[name]) grouped[name] = [];
-      grouped[name].push({ ip, ...entry });
-    }
-    return grouped;
-  };
-
-  const formatUptime = (seconds) => {
-    if (!seconds || seconds < 0) return 'N/A';
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${minutes}m`;
-  };
-
-  const formatLastSeen = (isoString) => {
-    if (!isoString) return 'N/A';
-    const diff = (Date.now() - new Date(isoString).getTime()) / 1000;
-    if (diff < 300) return null; // < 5 minutes, hide
-    return new Date(isoString).toLocaleTimeString();
-  };
-
-  const grouped = groupByHost(cache);
+  if (connectedCount === machineList.length && connectedCount > 0) {
+    statusText = "All Machines Connected";
+    statusClass = "status-green";
+  } else if (connectedCount > 0) {
+    statusText = "Some Machines Connected";
+    statusClass = "status-orange";
+  }
 
   return (
-    <div style={{ padding: '1rem', fontFamily: 'sans-serif' }}>
-      <img
-        src="https://www.7thsense.one/wp-content/uploads/2020/06/7thsense-logo.svg"
-        alt="7thSense Logo"
-        height="40"
-        style={{ float: 'right' }}
-      />
-      <h1>CircOS Frontend</h1>
-      {Object.keys(grouped).length === 0 ? (
-        <p>No machines discovered.</p>
+    <div className="App">
+      <h1>CircOS Machine Status</h1>
+      <div className={`status-banner ${statusClass}`}>{statusText}</div>
+
+      {machineList.length === 0 ? (
+        <p>No machines found.</p>
       ) : (
-        Object.entries(grouped).map(([hostname, entries]) => (
-          <div key={hostname} style={{ marginBottom: '2rem' }}>
-            <h2>{hostname}</h2>
-            <ul>
-              {entries.map(entry => (
-                <li key={entry.ip}>
-                  <div>
-                    <strong>IP:</strong> {entry.ip} —{' '}
-                    <strong>RTT:</strong> {entry.lastRtt != null ? `${entry.lastRtt} ms` : 'N/A'} —{' '}
-                    <strong>Uptime:</strong> {entry.uptime ? formatUptime(entry.uptime) : 'N/A'}
-                    {formatLastSeen(entry.lastSeen) && (
-                      <> — <strong>Last Seen:</strong> {formatLastSeen(entry.lastSeen)}</>
-                    )}
-                  </div>
-                  {services[entry.ip] === null ? (
-                    <div style={{ color: 'gray' }}>No service info</div>
-                  ) : (
-                    <ul style={{ marginLeft: '1rem' }}>
-                      {services[entry.ip] &&
-                        Object.entries(services[entry.ip]).map(([svc, state]) => (
-                          <li key={svc}>
-                            {svc}:{' '}
-                            <strong style={{ color: state.running ? 'green' : 'red' }}>
-                              {state.running ? 'Running' : 'Stopped'}
-                            </strong>
-                          </li>
-                        ))}
+        <div className="machine-grid">
+          {Object.entries(machines).map(([ip, data]) => (
+            <div className={`machine-box ${data.connected ? "" : "disconnected"}`} key={ip}>
+              <h2>{data.name} ({ip})</h2>
+              <p><strong>RTT:</strong> {data.lastRtt ? `${data.lastRtt} ms` : "N/A"}</p>
+              <p><strong>Uptime:</strong> {data.uptime !== null ? `${data.uptime}s` : "N/A"}</p>
+              <p><strong>Version:</strong> {data.version || "Unknown"}</p>
+              <p><strong>Status:</strong> {data.connected ? "🟢 Connected" : "⚠️ Disconnected"}</p>
+
+              {data.connected ? (
+                <div>
+                  <h3>Services</h3>
+                  {data.services ? (
+                    <ul>
+                      {Object.entries(data.services).map(([name, svc]) => (
+                        <li key={name}>
+                          {name}: {svc.running ? "🟢 Running" : "⚪ Stopped"}
+                        </li>
+                      ))}
                     </ul>
+                  ) : (
+                    <p>No service info</p>
                   )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
+                </div>
+              ) : (
+                <p style={{ color: "darkred" }}>Cannot reach backend.</p>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

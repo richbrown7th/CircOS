@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
-const bonjour = require('bonjour')();
+const Bonjour = require('bonjour');  // FIX: proper import
+const bonjour = Bonjour();           // FIX: proper initialization
 
 const app = express();
 const PORT = 8800;
@@ -10,27 +11,33 @@ const CACHE_FILE = './machine_cache.json';
 let machineCache = {};
 
 // Load machine cache
+// Load or initialize machine cache
 if (fs.existsSync(CACHE_FILE)) {
   try {
-    machineCache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    const raw = fs.readFileSync(CACHE_FILE, 'utf8');
+    machineCache = raw.trim() ? JSON.parse(raw) : {};
   } catch (err) {
-    console.error('[CACHE] Failed to load machine cache:', err.message);
+    console.error('[CACHE] Failed to parse machine cache. Recreating...');
+    machineCache = {};
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
   }
+} else {
+  console.log('[CACHE] No existing cache found. Creating new cache file.');
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 }
 
 // Start mDNS discovery
 bonjour.find({ type: 'circos' }, service => {
-  const ip = service.referer.address;
-  if (!machineCache[ip]) {
-    console.log('[mDNS] Discovered:', ip);
-    machineCache[ip] = {
-      name: service.name || 'Unnamed',
-      address: ip,
-      port: service.port || 9000,
-      lastSeen: new Date().toISOString()
-    };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-  }
+  const ip = service.referer?.address || 'unknown';
+  console.log('[mDNS] Discovered:', ip);
+  
+  machineCache[ip] = {
+    name: service.name || 'Unnamed',
+    address: ip,
+    port: service.port || 9000,
+    lastSeen: new Date().toISOString()
+  };
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 });
 
 app.use(cors());

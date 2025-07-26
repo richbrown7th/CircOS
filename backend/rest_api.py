@@ -1,12 +1,16 @@
 import uvicorn
-from fastapi import FastAPI
-from backend import circ_core, upload_handler, wol, log_writer, settings
-from zeroconf import Zeroconf, ServiceInfo
 import socket
 import threading
+import time
+import platform
+
+from fastapi import FastAPI
+from zeroconf import Zeroconf, ServiceInfo
+from backend import circ_core, upload_handler, wol, log_writer, settings
 
 app = FastAPI()
 zeroconf = Zeroconf()
+start_time = time.time()  # used for uptime calculation
 
 def register_mdns_service():
     try:
@@ -33,13 +37,36 @@ async def start_monitor():
 
 @app.on_event("shutdown")
 async def stop_monitor():
-    zeroconf.unregister_all_services()
-    zeroconf.close()
-    print("[mDNS] Service unregistered")
+    try:
+        zeroconf.unregister_all_services()
+        zeroconf.close()
+        print("[mDNS] Service unregistered")
+    except Exception as e:
+        print("[mDNS] Shutdown error:", e)
 
 @app.get("/status")
 def get_status():
     return circ_core.get_status()
+
+@app.get("/ping")
+def ping():
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        return {
+            "status": "pong",
+            "hostname": hostname,
+            "ip": ip,
+            "port": 9000,
+            "os": f"{platform.system()} {platform.release()}",
+            "uptime": int(time.time() - start_time),
+            "version": "v1.3.0"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.post("/start")
 def start_service(name: str):

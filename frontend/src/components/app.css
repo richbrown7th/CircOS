@@ -24,3 +24,54 @@
   color: #a60000;
   border: 1px solid #a60000;
 }
+
+.machine-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wol-button {
+  background-color: #ff9800;
+  border: none;
+  color: white;
+  padding: 6px 10px;
+  font-weight: bold;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.wol-button:hover {
+  background-color: #e68a00;
+}
+
+.machine-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.machine-box {
+  border: 2px solid #ccc;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
+  background-color: #fdfdfd;
+  position: relative;
+  transition: background-color 0.3s ease;
+}
+
+.machine-box.disconnected {
+  border-color: #e57373;
+  background-color: #fff5f5;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+p {
+  margin: 6px 0;
+}

@@ -17,6 +17,7 @@ dist/
 build/
 .cache/
 .vite/
+**/package-lock.json
 
 # OS
 .DS_Store

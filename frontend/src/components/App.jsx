@@ -4,155 +4,86 @@ import "./App.css";
 
 function App() {
   const [machines, setMachines] = useState({});
+  const [log, setLog] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const res = await axios.get("http://localhost:8800/cache");
-        const rawMachines = res.data;
-        const updated = {};
+        const hosts = {};
 
-        Object.entries(rawMachines).forEach(([ip, data]) => {
-          const isReachable =
-            data.lastPing &&
-            Date.now() - new Date(data.lastPing).getTime() < 120_000;
+        for (const [ip, data] of Object.entries(res.data)) {
+          const host = data.hostname || data.name || ip;
+          if (!hosts[host]) hosts[host] = { ...data, ips: [ip] };
+          else hosts[host].ips.push(ip);
+        }
 
-          const hostname = data.hostname || ip;
-
-          if (!updated[hostname]) {
-            updated[hostname] = {
-              name: data.name || hostname,
-              hostname,
-              ips: [],
-              connected: false,
-              lastRtt: null,
-              uptime: null,
-              version: null,
-              services: null,
-            };
-          }
-
-          updated[hostname].ips.push(ip);
-
-          if (
-            (data.connected !== undefined ? data.connected : isReachable) &&
-            data.uptime !== null &&
-            data.hostname !== null
-          ) {
-            updated[hostname].connected = true;
-            updated[hostname].lastRtt = data.lastRtt;
-            updated[hostname].uptime = data.uptime;
-            updated[hostname].version = data.version;
-            if (data.services) updated[hostname].services = data.services;
-          }
-        });
-
-        setMachines(updated);
+        setMachines(hosts);
       } catch (err) {
         console.error("[UI] Failed to load cache:", err.message);
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 10_000);
+    const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const machineList = Object.values(machines);
-  const connectedCount = machineList.filter((m) => m.connected).length;
-
-  let statusText = "Disconnected";
-  let statusClass = "status-red";
-
-  if (connectedCount === machineList.length && connectedCount > 0) {
-    statusText = "All Machines Connected";
-    statusClass = "status-green";
-  } else if (connectedCount > 0) {
-    statusText = "Some Machines Connected";
-    statusClass = "status-orange";
-  }
-
-  const sendWOL = async (hostname) => {
-    const entry = machines[hostname];
-    const mac = entry?.mac;
-    const ip = entry?.ips?.[0];
-    if (!ip) return;
-
+  const handleWol = async (mac, host) => {
     try {
-      await axios.post(`http://${ip}:9000/wol`, { mac });
-      console.log(`[WOL] Sent WOL to ${hostname}`);
+      setLog(prev => [...prev, `Sending WOL for ${host}`]);
+      await axios.post("http://localhost:9000/wol", { mac });
+      setLog(prev => [...prev, `✅ WOL sent to ${host}`]);
     } catch (err) {
-      console.error(`[WOL] Failed to send WOL to ${hostname}:`, err.message);
+      setLog(prev => [...prev, `❌ WOL failed for ${host}: ${err.message}`]);
     }
   };
 
+  const hostList = Object.values(machines);
+
   return (
-    <div className="App">
-      <h1>CircOS Machine Status</h1>
-      <div className={`status-banner ${statusClass}`}>{statusText}</div>
-
-      {machineList.length === 0 ? (
-        <p>No machines found.</p>
-      ) : (
-        <div className="machine-grid">
-          {machineList.map((hostData) => (
-            <div
-              className={`machine-box ${hostData.connected ? "" : "disconnected"}`}
-              key={hostData.hostname}
-            >
-              <div className="machine-header">
-                <h2>{hostData.name}</h2>
-                {!hostData.connected && (
-                  <button
-                    className="wol-button"
-                    onClick={() => sendWOL(hostData.hostname)}
-                  >
-                    Wake
-                  </button>
-                )}
-              </div>
-
-              <p>
-                <strong>IPs:</strong> {hostData.ips.join(", ")}
-              </p>
-              <p>
-                <strong>RTT:</strong>{" "}
-                {hostData.lastRtt ? `${hostData.lastRtt} ms` : "N/A"}
-              </p>
-              <p>
-                <strong>Uptime:</strong>{" "}
-                {hostData.uptime !== null ? `${hostData.uptime}s` : "N/A"}
-              </p>
-              <p>
-                <strong>Version:</strong> {hostData.version || "Unknown"}
-              </p>
-              <p>
-                <strong>Status:</strong>{" "}
-                {hostData.connected ? "🟢 Connected" : "⚠️ Disconnected"}
-              </p>
-
-              {hostData.connected ? (
-                <div>
-                  <h3>Services</h3>
-                  {hostData.services ? (
-                    <ul>
-                      {Object.entries(hostData.services).map(([name, svc]) => (
-                        <li key={name}>
-                          {name}: {svc.running ? "🟢 Running" : "⚪ Stopped"}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>No service info</p>
-                  )}
-                </div>
-              ) : (
-                <p style={{ color: "darkred" }}>Cannot reach backend.</p>
+    <div className="App dark">
+      <h1>CircOS Status</h1>
+      <div className="grid">
+        {hostList.map((host, idx) => (
+          <div className="host-card" key={idx}>
+            <div className="header">
+              <h2>{host.name || host.hostname || `Host ${idx + 1}`}</h2>
+              {!host.connected && host.mac && (
+                <button
+                  className="wol-btn"
+                  onClick={() => handleWol(host.mac, host.name)}
+                >
+                  🔌 Wake
+                </button>
               )}
             </div>
+            <p><strong>IPs:</strong> {host.ips.join(", ")}</p>
+            <p><strong>RTT:</strong> {host.lastRtt ?? "N/A"} ms</p>
+            <p><strong>Uptime:</strong> {host.uptime ?? "N/A"} s</p>
+            <p><strong>Version:</strong> {host.version ?? "Unknown"}</p>
+            <p><strong>Status:</strong> {host.connected ? "🟢 Connected" : "🔴 Offline"}</p>
+            {host.services && (
+              <>
+                <h3>Services</h3>
+                <ul>
+                  {Object.entries(host.services).map(([svc, obj]) => (
+                    <li key={svc}>{svc}: {obj.running ? "🟢 Running" : "⚪ Stopped"}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="log">
+        <h3>Frontend Log</h3>
+        <ul>
+          {log.map((entry, i) => (
+            <li key={i}>{entry}</li>
           ))}
-        </div>
-      )}
+        </ul>
+      </div>
     </div>
   );
 }

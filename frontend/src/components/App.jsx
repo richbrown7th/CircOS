@@ -1,4 +1,3 @@
-// === App.jsx ===
 import React, { useEffect, useReducer, useState } from "react";
 import axios from "axios";
 import "./App.css";
@@ -35,7 +34,6 @@ function App() {
   const appendLog = (msg) => {
     const timestamp = new Date().toLocaleTimeString();
     setLog((prev) => [...prev, `[${timestamp}] ${msg}`]);
-
     if (window.Notification && Notification.permission === "granted") {
       new Notification("CircOS Log", { body: msg });
     }
@@ -58,7 +56,6 @@ function App() {
             hosts[hostKey] = { ...data, ips: [ip] };
           } else {
             hosts[hostKey].ips.push(ip);
-            // Use freshest ping info
             if (new Date(data.lastSeen) > new Date(hosts[hostKey].lastSeen || 0)) {
               hosts[hostKey] = {
                 ...hosts[hostKey],
@@ -120,68 +117,68 @@ function App() {
       <div className="grid">
         {hostList.map((host, idx) => (
           <div className="host-card fade-in" key={idx}>
-            <div className="header">
+            <div className="header-flex">
               <h2>{host.name || host.hostname || `Host ${idx + 1}`}</h2>
+              <span className="small-ip">{host.ips?.[0]}</span>
+            </div>
+            <div className="status-line">
+              <span className={host.connected ? "status-connected" : "status-disconnected"}>
+                {host.connected ? "🟢 Connected" : "🔴 Offline"}
+              </span>
             </div>
 
-            {/* DEBUG INFO */}
-            <p><strong>Host:</strong> {host.hostname}</p>
-            <p><strong>Connected:</strong> {String(host.connected)}</p>
-
-            <p><strong>IPs:</strong> {host.ips?.join(", ") || "N/A"}</p>
-            <p><strong>Status:</strong> {host.connected ? "🟢 Connected" : "🔴 Offline"}</p>
-
             {host.services && (
-            <>
-              <h3>Services</h3>
-              <ul className="service-list">
-                {Object.entries(host.services).map(([svc, obj]) => {
-                  const inputKey = `${host.hostname}-${svc}`;
-                  const lastStartedDate = obj.lastStarted ? new Date(obj.lastStarted) : null;
-                  const secondsAgo = lastStartedDate ? Math.floor((Date.now() - lastStartedDate.getTime()) / 1000) : null;
-                  const displayAgo = secondsAgo !== null && secondsAgo < 60 ? `${secondsAgo}s ago` : null;
+              <>
+                <ul className="service-list">
+                  {Object.entries(host.services).map(([svc, obj]) => {
+                    const inputKey = `${host.hostname}-${svc}`;
+                    const appName = obj.url?.split("/").pop() || svc;
 
-                  return (
-                    <li key={svc} className="service-entry relative">
-                      <strong>{svc}</strong>: {obj.running ? "🟢 Running" : "⚪ Stopped"}
-                      {displayAgo && (
-                        <span
-                          className="last-started-label fade-out"
-                          title={`Restarted at ${lastStartedDate.toLocaleTimeString()}`}
-                        >
-                          restarted {displayAgo}
-                        </span>
-                      )}
-                      <p>
-                        URL:{" "}
-                        <input
-                          type="text"
-                          value={editedUrls[inputKey] ?? obj.url ?? ""}
-                          onChange={(e) =>
-                            setEditedUrls((prev) => ({ ...prev, [inputKey]: e.target.value }))
-                          }
-                          onBlur={(e) =>
-                            handleEdit(host, svc, "url", e.target.value)
-                          }
-                        />
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
+                    const lastStartedDate = obj.lastStarted ? new Date(Date.now() - parseInt(obj.lastStarted) * 1000) : null;
+                    const secondsAgo = obj.lastStarted ? Math.floor((Date.now() - obj.lastStarted * 1000) / 1000) : null;
+                    const displayAgo = secondsAgo !== null && secondsAgo < 60 ? `${secondsAgo}s ago` : null;
+                    return (
+                      <li key={svc} className="service-entry compact-entry">
+                        <div className="service-row">
+                          <strong>{appName}</strong>
+                          <span className="service-status">
+                            {obj.running ? "🟢 Running" : "⚪ Stopped"}
+                          </span>
+                          {displayAgo && (
+                            <span
+                              className="last-started-label fade-out"
+                              title={`Restarted at ${lastStartedDate?.toLocaleTimeString()}`}
+                            >
+                              restarted {displayAgo}
+                            </span>
+                          )}
+                        </div>
+                        <div className="service-url-row">
+                          <input
+                            type="text"
+                            value={editedUrls[inputKey] ?? obj.url ?? ""}
+                            onChange={(e) => setEditedUrls(prev => ({ ...prev, [inputKey]: e.target.value }))}
+                            onBlur={(e) => handleEdit(host, svc, "url", e.target.value)}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </div>
         ))}
       </div>
+
       <div className="log">
-  <h3>Frontend Log</h3>
-  <ul className="log-list">
-    {log.map((entry, i) => (
-      <li key={i} className="log-entry fade-in">{entry}</li>
-    ))}
-  </ul>
-</div>
+        <h3>Frontend Log</h3>
+        <ul className="log-list">
+          {log.map((entry, i) => (
+            <li key={i} className="log-entry fade-in">{entry}</li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

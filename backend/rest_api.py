@@ -272,7 +272,7 @@ def get_services():
             "singleton": conf.get("singleton", True),
             "running": len(pids) > 0,
             "pids": pids,
-            "lastStarted": int(last_started_ts * 1000) if last_started_ts else None
+            "lastStarted": last_started_ts if last_started_ts else None  # ⬅️ send timestamp
         }
     return result
 

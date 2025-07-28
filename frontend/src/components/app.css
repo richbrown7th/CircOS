@@ -45,7 +45,8 @@ h1 {
   border-color: #ff4b4b;
 }
 
-.machine-grid {
+.machine-grid,
+.grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 20px;
@@ -59,10 +60,15 @@ h1 {
   position: relative;
   border: 1px solid #3c3c5a;
   transition: transform 0.2s ease;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .host-card:hover {
-  transform: translateY(-4px);
+  transform: scale(1.01);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .host-card h2 {
@@ -84,7 +90,8 @@ ul {
   padding-left: 20px;
 }
 
-.wol-button {
+.wol-button,
+.wol-btn {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -99,17 +106,20 @@ ul {
   transition: background-color 0.2s ease;
 }
 
-.wol-button:hover {
+.wol-button:hover,
+.wol-btn:hover {
   background-color: #5b7bff;
 }
 
-.wol-button:disabled {
+.wol-button:disabled,
+.wol-btn:disabled {
   background-color: #555c7a;
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.frontend-log {
+.frontend-log,
+.log {
   margin-top: 40px;
   background-color: #191933;
   padding: 20px;
@@ -121,7 +131,8 @@ ul {
   overflow-y: auto;
 }
 
-.frontend-log h3 {
+.frontend-log h3,
+.log h3 {
   margin-top: 0;
   color: #ddd;
   font-size: 1.1rem;
@@ -134,4 +145,67 @@ ul {
   font-family: monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.service-entry {
+  border-top: 1px solid #444;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.service-entry label {
+  display: block;
+  margin: 4px 0;
+  font-weight: 500;
+}
+
+.service-entry input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 4px;
+  background-color: #1e1e2f;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #eee;
+}
+
+.service-entry input[type="checkbox"] {
+  margin-right: 6px;
+  transform: scale(1.1);
+}
+
+.service-entry .pid-list {
+  font-size: 0.85rem;
+  margin: 4px 0 8px 0;
+  color: #ccc;
+}
+
+.service-entry button,
+.service-entry button.stop-btn {
+  background-color: #c84343;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background-color 0.2s ease;
+}
+
+.service-entry button:hover,
+.service-entry button.stop-btn:hover {
+  background-color: #e25c5c;
+}
+
+.service-list {
+  min-height: 100px;
+  margin: 0;
+  padding-left: 0;
+  list-style-type: none;
+}
+
+.service-placeholder {
+  opacity: 0.5;
+  font-style: italic;
+  padding: 8px;
 }

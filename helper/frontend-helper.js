@@ -4,6 +4,7 @@ const fs = require('fs');
 const ping = require('ping');
 const Bonjour = require('bonjour');
 const axios = require('axios');
+const dns = require('dns').promises;
 
 const bonjour = Bonjour();
 const app = express();
@@ -51,17 +52,45 @@ bonjour.find({ type: 'circos' }, service => {
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 });
 
-// Helper: Fetch service status
-async function fetchStatus(ip, port) {
+// Utilities
+function isLoopback(ip) {
+  return ip.startsWith('127.') || ip === '::1';
+}
+
+function isUsableIP(ip) {
+  return ip && !isLoopback(ip);
+}
+
+async function resolveIPv4PreferNonLoopback(hostname) {
   try {
-    const response = await axios.get(`http://${ip}:${port}/status`, { timeout: 1000 });
-    machineCache[ip].services = response.data;
-    machineCache[ip].connected = true;
-  } catch (err) {
-    console.warn(`[SERVICES] Failed to fetch status from ${ip}:${port} — ${err.code || err.message}`);
-    machineCache[ip].services = null;
-    machineCache[ip].connected = false;
+    const res = await dns.lookup(hostname, { all: true, family: 4 });
+    const usable = res.find(r => isUsableIP(r.address));
+    return usable?.address || res[0]?.address;
+  } catch (e) {
+    console.warn(`[IP-RESOLVE] Failed to resolve ${hostname}: ${e.message}`);
+    return null;
   }
+}
+
+async function tryUpdateCachedIP(ip, cache) {
+  const host = cache.hostname || cache.name;
+  if (!host || !host.endsWith('.local') || cache.name === 'Manual') return ip;
+
+  const newIP = await resolveIPv4PreferNonLoopback(host);
+  if (newIP && newIP !== ip) {
+    console.log(`[IP-REFRESH] IP for ${host} changed from ${ip} to ${newIP}`);
+
+    machineCache[newIP] = { ...cache, address: newIP };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+
+    if (isLoopback(ip)) {
+      delete machineCache[ip];
+      console.log(`[IP-REFRESH] Removed loopback cache entry for ${ip}`);
+    }
+
+    return newIP;
+  }
+  return ip;
 }
 
 // Ping loop with backend trust
@@ -72,14 +101,22 @@ async function updatePings(source = "scheduler") {
   console.log(`[PING] (${source}) Checking ${ips.length} cached machines...`);
   let updated = false;
 
-  for (const ip of ips) {
+  for (let ip of ips) {
     const now = new Date().toISOString();
     let backendAlive = false;
+    let cache = machineCache[ip];
+
+    if (!cache.connected) {
+      const refreshedIP = await tryUpdateCachedIP(ip, cache);
+      if (refreshedIP !== ip) {
+        ip = refreshedIP;
+        cache = machineCache[ip];
+      }
+    }
 
     try {
       const res = await ping.promise.probe(ip);
       const rtt = res.time;
-      const cache = machineCache[ip];
 
       cache.lastPing = now;
       cache.lastRtt = rtt;
@@ -100,8 +137,15 @@ async function updatePings(source = "scheduler") {
       }
 
       if (backendAlive) {
-        await fetchStatus(ip, cache.port || 9000);
-        cache.connected = true;
+        try {
+          const response = await axios.get(`http://${ip}:${cache.port || 9000}/status`, { timeout: 1000 });
+          cache.services = response.data;
+          cache.connected = true;
+        } catch (err) {
+          console.warn(`[SERVICES] Failed to fetch status from ${ip} — ${err.code || err.message}`);
+          cache.services = null;
+          cache.connected = false;
+        }
         updated = true;
         console.log(`[PING] ${ip} backend responsive. RTT ${rtt} ms.`);
       } else {
@@ -119,7 +163,7 @@ async function updatePings(source = "scheduler") {
   }
 }
 
-setInterval(() => updatePings("interval"), 60_000); // every 60s
+setInterval(() => updatePings("interval"), 60_000);
 
 // REST endpoints
 app.use(cors());
@@ -165,7 +209,6 @@ app.get('/services/:ip', async (req, res) => {
   }
 });
 
-// GUI-triggered refresh endpoint
 app.post('/refresh', async (req, res) => {
   console.log("[REFRESH] Manual refresh requested via GUI");
   await updatePings("gui");
@@ -176,7 +219,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[helper] Listening on http://0.0.0.0:${PORT}`);
 });
 
-// Backend-to-helper notification on startup
 app.post('/notify-startup', async (req, res) => {
   const { ip, name, port } = req.body;
   if (!ip) return res.status(400).json({ error: "Missing IP" });
@@ -194,14 +236,10 @@ app.post('/notify-startup', async (req, res) => {
 
   await updatePings(`startup-${ip}`);
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-
-  // 🚀 Trigger immediate ping to force GUI refresh
   setTimeout(() => updatePings(`startup-refresh-${ip}`), 100);
-
   res.json({ success: true });
 });
 
-// Backend-to-helper: shutdown
 app.post('/notify-shutdown', (req, res) => {
   const { ip } = req.body;
   if (!ip) return res.status(400).json({ error: "Missing IP" });
@@ -211,8 +249,6 @@ app.post('/notify-shutdown', (req, res) => {
     machineCache[ip].connected = false;
     machineCache[ip].services = null;
     fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-
-    // 🚀 Trigger immediate ping to force GUI refresh
     setTimeout(() => updatePings(`shutdown-refresh-${ip}`), 100);
   }
 

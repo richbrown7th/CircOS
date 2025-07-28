@@ -1,0 +1,6 @@
+{
+  "demo-app": {
+    "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
+    "singleton": true
+  }
+}

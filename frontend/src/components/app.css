@@ -209,3 +209,38 @@ ul {
   font-style: italic;
   padding: 8px;
 }
+
+.service-entry {
+  position: relative;
+  padding-top: 1.5em;
+}
+
+.last-started-label {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.7em;
+  color: #eab308;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: opacity 1s ease-out;
+}
+
+/* Optional fade-out after 1 minute */
+.fade-out {
+  animation: fadeOut 60s forwards;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}

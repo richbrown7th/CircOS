@@ -176,6 +176,8 @@ async def start_monitor():
     notify_helpers("startup")
     threading.Thread(target=monitor_services, daemon=True).start()
 
+recent_starts = {}
+
 def monitor_services(interval=5):
     print(f"[monitor] Starting service monitor loop (every {interval}s)")
     while True:
@@ -197,16 +199,16 @@ def monitor_services(interval=5):
 
             if not running:
                 print(f"[monitor] Detected stopped service '{name}'")
-                
-                # Notify helper BEFORE attempting restart
                 notify_helpers("startup")
 
                 if auto_restart:
                     print(f"[monitor] Restarting service '{name}'")
                     try:
                         subprocess.Popen(url, shell=True)
-                        time.sleep(0.5)  # give it a moment to launch
-                        notify_helpers("startup")  # refresh again post-restart
+                        ts = time.time()
+                        recent_starts[name] = ts
+                        time.sleep(0.5)
+                        notify_helpers("startup")
                     except Exception as e:
                         print(f"[monitor] Failed to restart {name}: {e}")
         time.sleep(interval)
@@ -251,6 +253,7 @@ def ping(request: Request):
 @app.get("/services")
 def get_services():
     load_services()
+    now = time.time()
     result = {}
     for name, conf in services.items():
         url = conf.get("url", "")
@@ -259,11 +262,17 @@ def get_services():
             cmdline = p.info.get("cmdline") or []
             if url and url in " ".join(cmdline):
                 pids.append(p.info["pid"])
+
+        last_started_ts = recent_starts.get(name)
+        last_started_age = now - last_started_ts if last_started_ts else None
+        last_started_ts = recent_starts.get(name)  # already a float UNIX timestamp
+
         result[name] = {
             "url": url,
             "singleton": conf.get("singleton", True),
             "running": len(pids) > 0,
-            "pids": pids
+            "pids": pids,
+            "lastStarted": int(last_started_ts * 1000) if last_started_ts else None
         }
     return result
 

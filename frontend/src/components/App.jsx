@@ -132,28 +132,45 @@ function App() {
             <p><strong>Status:</strong> {host.connected ? "🟢 Connected" : "🔴 Offline"}</p>
 
             {host.services && (
-              <>
-                <h3>Services</h3>
-                <ul className="service-list">
-                  {Object.entries(host.services).map(([svc, obj]) => {
-                    const inputKey = `${host.hostname}-${svc}`;
-                    return (
-                      <li key={svc} className="service-entry">
-                        <strong>{svc}</strong>: {obj.running ? "🟢 Running" : "⚪ Stopped"}
-                        <p>
-                          URL: <input
-                            type="text"
-                            value={editedUrls[inputKey] ?? obj.url ?? ""}
-                            onChange={(e) => setEditedUrls(prev => ({ ...prev, [inputKey]: e.target.value }))}
-                            onBlur={(e) => handleEdit(host, svc, "url", e.target.value)}
-                          />
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
+            <>
+              <h3>Services</h3>
+              <ul className="service-list">
+                {Object.entries(host.services).map(([svc, obj]) => {
+                  const inputKey = `${host.hostname}-${svc}`;
+                  const lastStartedDate = obj.lastStarted ? new Date(obj.lastStarted) : null;
+                  const secondsAgo = lastStartedDate ? Math.floor((Date.now() - lastStartedDate.getTime()) / 1000) : null;
+                  const displayAgo = secondsAgo !== null && secondsAgo < 60 ? `${secondsAgo}s ago` : null;
+
+                  return (
+                    <li key={svc} className="service-entry relative">
+                      <strong>{svc}</strong>: {obj.running ? "🟢 Running" : "⚪ Stopped"}
+                      {displayAgo && (
+                        <span
+                          className="last-started-label fade-out"
+                          title={`Restarted at ${lastStartedDate.toLocaleTimeString()}`}
+                        >
+                          restarted {displayAgo}
+                        </span>
+                      )}
+                      <p>
+                        URL:{" "}
+                        <input
+                          type="text"
+                          value={editedUrls[inputKey] ?? obj.url ?? ""}
+                          onChange={(e) =>
+                            setEditedUrls((prev) => ({ ...prev, [inputKey]: e.target.value }))
+                          }
+                          onBlur={(e) =>
+                            handleEdit(host, svc, "url", e.target.value)
+                          }
+                        />
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
           </div>
         ))}
       </div>

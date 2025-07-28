@@ -174,6 +174,42 @@ async def start_monitor():
     circ_core.load_config()
     circ_core.start_monitoring()
     notify_helpers("startup")
+    threading.Thread(target=monitor_services, daemon=True).start()
+
+def monitor_services(interval=5):
+    print(f"[monitor] Starting service monitor loop (every {interval}s)")
+    while True:
+        load_services()
+        for name, conf in services.items():
+            url = conf.get("url", "")
+            singleton = conf.get("singleton", True)
+            auto_restart = conf.get("auto_restart", True)
+
+            if not url:
+                continue
+
+            running = False
+            for p in psutil.process_iter(["cmdline"]):
+                cmdline = p.info.get("cmdline") or []
+                if url in " ".join(cmdline):
+                    running = True
+                    break
+
+            if not running:
+                print(f"[monitor] Detected stopped service '{name}'")
+                
+                # Notify helper BEFORE attempting restart
+                notify_helpers("startup")
+
+                if auto_restart:
+                    print(f"[monitor] Restarting service '{name}'")
+                    try:
+                        subprocess.Popen(url, shell=True)
+                        time.sleep(0.5)  # give it a moment to launch
+                        notify_helpers("startup")  # refresh again post-restart
+                    except Exception as e:
+                        print(f"[monitor] Failed to restart {name}: {e}")
+        time.sleep(interval)
 
 @app.on_event("shutdown")
 async def stop_monitor():

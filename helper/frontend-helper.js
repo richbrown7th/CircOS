@@ -12,14 +12,14 @@ const PORT = 8800;
 const CACHE_FILE = './machine_cache.json';
 let machineCache = {};
 
-// publish for end points to be aware of helper presence
+// Publish presence for mDNS discovery
 bonjour.publish({
   name: "CircOS Helper",
   type: "circos-helper",
-  port: 8800
+  port: PORT
 });
 
-// Load machine cache
+// Load existing cache
 if (fs.existsSync(CACHE_FILE)) {
   try {
     const raw = fs.readFileSync(CACHE_FILE, 'utf8');
@@ -52,7 +52,7 @@ bonjour.find({ type: 'circos' }, service => {
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 });
 
-// Utilities
+// === UTILITIES ===
 function isLoopback(ip) {
   return ip.startsWith('127.') || ip === '::1';
 }
@@ -79,31 +79,30 @@ async function tryUpdateCachedIP(ip, cache) {
   const newIP = await resolveIPv4PreferNonLoopback(host);
   if (newIP && newIP !== ip) {
     console.log(`[IP-REFRESH] IP for ${host} changed from ${ip} to ${newIP}`);
-
     machineCache[newIP] = { ...cache, address: newIP };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 
     if (isLoopback(ip)) {
       delete machineCache[ip];
       console.log(`[IP-REFRESH] Removed loopback cache entry for ${ip}`);
     }
 
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
     return newIP;
   }
+
   return ip;
 }
 
-// Ping loop with backend trust
+// === CORE: Ping and Fetch Info ===
 async function updatePings(source = "scheduler") {
   const ips = Object.keys(machineCache);
   if (!ips.length) return;
 
-  console.log(`[PING] (${source}) Checking ${ips.length} cached machines...`);
+  console.log(`[PING] (${source}) Checking ${ips.length} machines...`);
   let updated = false;
 
   for (let ip of ips) {
     const now = new Date().toISOString();
-    let backendAlive = false;
     let cache = machineCache[ip];
 
     if (!cache.connected) {
@@ -130,31 +129,23 @@ async function updatePings(source = "scheduler") {
         cache.uptime = info.uptime ?? null;
         cache.hostname = info.hostname ?? null;
         cache.version = info.version ?? null;
-
-        backendAlive = true;
       } catch (e) {
-        console.warn(`[PING] /ping request to ${ip} failed: ${e.message}`);
+        console.warn(`[PING] /ping failed for ${ip}: ${e.message}`);
       }
 
-      if (backendAlive) {
-        try {
-          const response = await axios.get(`http://${ip}:${cache.port || 9000}/status`, { timeout: 1000 });
-          cache.services = response.data;
-          cache.connected = true;
-        } catch (err) {
-          console.warn(`[SERVICES] Failed to fetch status from ${ip} — ${err.code || err.message}`);
-          cache.services = null;
-          cache.connected = false;
-        }
+      try {
+        const svcRes = await axios.get(`http://${ip}:${cache.port || 9000}/services`, { timeout: 1000 });
+        cache.services = svcRes.data;
+        cache.connected = true;
         updated = true;
-        console.log(`[PING] ${ip} backend responsive. RTT ${rtt} ms.`);
-      } else {
-        cache.connected = false;
+        console.log(`[PING] ${ip} is responsive. RTT: ${rtt}ms`);
+      } catch (err) {
+        console.warn(`[SERVICES] Fetch failed from ${ip}: ${err.message}`);
         cache.services = null;
-        console.log(`[PING] ${ip} marked disconnected.`);
+        cache.connected = false;
       }
     } catch (e) {
-      console.warn(`[PING] Failed to ping ${ip}: ${e.message}`);
+      console.warn(`[PING] General failure for ${ip}: ${e.message}`);
     }
   }
 
@@ -165,7 +156,7 @@ async function updatePings(source = "scheduler") {
 
 setInterval(() => updatePings("interval"), 60_000);
 
-// REST endpoints
+// === API ===
 app.use(cors());
 app.use(express.json());
 
@@ -196,47 +187,28 @@ app.post('/cache', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/services/:ip', async (req, res) => {
-  const ip = req.params.ip;
-  const port = machineCache[ip]?.port || 9000;
-
-  try {
-    const response = await axios.get(`http://${ip}:${port}/status`, { timeout: 1000 });
-    res.json(response.data);
-  } catch (err) {
-    console.warn(`[SERVICES] Failed to fetch status from ${ip}:${port} — ${err.code || err.message}`);
-    res.status(500).json({ error: 'Failed to fetch status' });
-  }
-});
-
 app.post('/refresh', async (req, res) => {
-  console.log("[REFRESH] Manual refresh requested via GUI");
-  await updatePings("gui");
-  res.json({ success: true, refreshed: true });
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[helper] Listening on http://0.0.0.0:${PORT}`);
+  console.log("[REFRESH] Manual refresh from UI");
+  await updatePings("manual-refresh");
+  res.json({ success: true });
 });
 
 app.post('/notify-startup', async (req, res) => {
   const { ip, name, port } = req.body;
   if (!ip) return res.status(400).json({ error: "Missing IP" });
 
-  console.log(`[STARTUP] Backend at ${ip} notifying startup`);
-
+  console.log(`[STARTUP] Backend at ${ip} startup notification`);
   machineCache[ip] = {
     ...(machineCache[ip] || {}),
     name: name || machineCache[ip]?.name || "Manual",
     address: ip,
-    port: port || machineCache[ip]?.port || 9000,
+    port: port || 9000,
     lastSeen: new Date().toISOString(),
     connected: true,
   };
 
-  await updatePings(`startup-${ip}`);
+  await updatePings(`notify-startup-${ip}`);
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-  setTimeout(() => updatePings(`startup-refresh-${ip}`), 100);
   res.json({ success: true });
 });
 
@@ -244,13 +216,18 @@ app.post('/notify-shutdown', (req, res) => {
   const { ip } = req.body;
   if (!ip) return res.status(400).json({ error: "Missing IP" });
 
-  console.log(`[SHUTDOWN] Backend at ${ip} notified shutdown`);
+  console.log(`[SHUTDOWN] Backend at ${ip} shutdown notification`);
   if (machineCache[ip]) {
     machineCache[ip].connected = false;
     machineCache[ip].services = null;
     fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-    setTimeout(() => updatePings(`shutdown-refresh-${ip}`), 100);
+    setTimeout(() => updatePings(`notify-shutdown-${ip}`), 100);
   }
 
   res.json({ success: true });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[helper] Listening at http://0.0.0.0:${PORT}`);
+  updatePings("startup");  // immediate startup ping
 });

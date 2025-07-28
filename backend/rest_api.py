@@ -47,7 +47,6 @@ def load_services():
         }
         save_services()
 
-    # Ensure valid structure
     changed = False
     for name, conf in services.items():
         if "url" not in conf:
@@ -81,7 +80,13 @@ class HelperListener(ServiceListener):
                 ip = socket.inet_ntoa(addr)
                 helper_ips.add(ip)
                 print(f"[mDNS] Helper discovered: {ip}:{info.port}")
+
     def remove_service(self, zeroconf, type_, name):
+        # Optional cleanup
+        pass
+
+    def update_service(self, zeroconf, type_, name):
+        # Required by interface, even if unused
         pass
 
 def discover_helpers():
@@ -149,7 +154,7 @@ def start_all_services():
             found = False
             for p in psutil.process_iter(["cmdline"]):
                 cmdline = p.info.get("cmdline") or []
-                if name in " ".join(cmdline):
+                if url in " ".join(cmdline):
                     found = True
                     break
             if found:
@@ -212,12 +217,14 @@ def get_services():
     load_services()
     result = {}
     for name, conf in services.items():
+        url = conf.get("url", "")
         pids = []
         for p in psutil.process_iter(["pid", "name", "cmdline"]):
-            if name in " ".join(p.info.get("cmdline", [])):
+            cmdline = p.info.get("cmdline") or []
+            if url and url in " ".join(cmdline):
                 pids.append(p.info["pid"])
         result[name] = {
-            "url": conf.get("url"),
+            "url": url,
             "singleton": conf.get("singleton", True),
             "running": len(pids) > 0,
             "pids": pids
@@ -245,22 +252,26 @@ def start_custom(name: str):
     conf = services.get(name)
     if not conf:
         return {"error": "Unknown service"}
-    url = conf.get("url")
+    url = conf.get("url", "")
     singleton = conf.get("singleton", True)
     if not url:
         return {"error": "No URL set"}
     if singleton:
         for p in psutil.process_iter(["cmdline"]):
-            if name in " ".join(p.info.get("cmdline", [])):
+            cmdline = p.info.get("cmdline") or []
+            if url in " ".join(cmdline):
                 return {"info": "Already running"}
     subprocess.Popen(url, shell=True)
     return {"started": True}
 
 @app.post("/services/stop")
 def stop_custom(name: str):
+    load_services()
+    url = services.get(name, {}).get("url", "")
     stopped = 0
     for p in psutil.process_iter(["pid", "cmdline"]):
-        if name in " ".join(p.info.get("cmdline", [])):
+        cmdline = p.info.get("cmdline") or []
+        if url and url in " ".join(cmdline):
             try:
                 p.kill()
                 stopped += 1

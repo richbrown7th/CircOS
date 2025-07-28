@@ -30,7 +30,7 @@ start_time = time.time()
 HELPER_PORT = 8800
 helper_ips = set()
 
-SERVICES_FILE = "services.json"
+SERVICES_FILE = os.path.join(os.path.dirname(__file__), "services.json")
 services = {}
 
 def load_services():
@@ -39,13 +39,29 @@ def load_services():
         with open(SERVICES_FILE, "r") as f:
             services = json.load(f)
     else:
-        services = {}
+        services = {
+            "demo-app": {
+                "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
+                "singleton": True
+            }
+        }
+        save_services()
+
+    # Ensure valid structure
+    changed = False
+    for name, conf in services.items():
+        if "url" not in conf:
+            services[name]["url"] = ""
+            changed = True
+        if "singleton" not in conf:
+            services[name]["singleton"] = True
+            changed = True
+    if changed:
+        save_services()
 
 def save_services():
     with open(SERVICES_FILE, "w") as f:
         json.dump(services, f, indent=2)
-
-load_services()
 
 def get_local_ip():
     try:
@@ -123,10 +139,33 @@ def register_mdns_service():
     except Exception as e:
         print("[mDNS] Registration failed:", e)
 
+def start_all_services():
+    for name, conf in services.items():
+        url = conf.get("url")
+        singleton = conf.get("singleton", True)
+        if not url:
+            continue
+        if singleton:
+            found = False
+            for p in psutil.process_iter(["cmdline"]):
+                cmdline = p.info.get("cmdline") or []
+                if name in " ".join(cmdline):
+                    found = True
+                    break
+            if found:
+                continue
+        print(f"[startup] Launching service {name}: {url}")
+        try:
+            subprocess.Popen(url, shell=True)
+        except Exception as e:
+            print(f"[startup] Failed to launch {name}: {e}")
+
 @app.on_event("startup")
 async def start_monitor():
     discover_helpers()
     threading.Thread(target=register_mdns_service, daemon=True).start()
+    load_services()
+    start_all_services()
     circ_core.load_config()
     circ_core.start_monitoring()
     notify_helpers("startup")
@@ -170,7 +209,7 @@ def ping(request: Request):
 
 @app.get("/services")
 def get_services():
-    load_services()  # Reload latest config
+    load_services()
     result = {}
     for name, conf in services.items():
         pids = []

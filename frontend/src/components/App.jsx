@@ -1,8 +1,8 @@
+// === App.jsx ===
 import React, { useEffect, useReducer, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-// Reducer for managing machines state
 const machineReducer = (state, action) => {
   switch (action.type) {
     case "SET_MACHINES":
@@ -30,11 +30,11 @@ const machineReducer = (state, action) => {
 function App() {
   const [machines, dispatch] = useReducer(machineReducer, {});
   const [log, setLog] = useState([]);
+  const [editedUrls, setEditedUrls] = useState({});
 
   const appendLog = (msg) => {
     const timestamp = new Date().toLocaleTimeString();
-    const fullMsg = `[${timestamp}] ${msg}`;
-    setLog((prev) => [...prev, fullMsg]);
+    setLog((prev) => [...prev, `[${timestamp}] ${msg}`]);
 
     if (window.Notification && Notification.permission === "granted") {
       new Notification("CircOS Log", { body: msg });
@@ -52,14 +52,25 @@ function App() {
         const hosts = {};
 
         for (const [ip, data] of Object.entries(res.data)) {
-          const host = data.hostname || data.name || ip;
-          if (!hosts[host]) hosts[host] = { ...data, ips: [ip] };
-          else hosts[host].ips.push(ip);
+          const hostKey = data.hostname || data.name || ip;
+
+          if (!hosts[hostKey]) {
+            hosts[hostKey] = { ...data, ips: [ip] };
+          } else {
+            hosts[hostKey].ips.push(ip);
+            // Use freshest ping info
+            if (new Date(data.lastSeen) > new Date(hosts[hostKey].lastSeen || 0)) {
+              hosts[hostKey] = {
+                ...hosts[hostKey],
+                ...data,
+                ips: hosts[hostKey].ips
+              };
+            }
+          }
         }
 
         dispatch({ type: "SET_MACHINES", payload: hosts });
       } catch (err) {
-        console.error("[UI] Failed to load cache:", err.message);
         appendLog(`❌ Failed to load cache: ${err.message}`);
       }
     };
@@ -74,67 +85,30 @@ function App() {
     return host.ips.find(ip => !ip.startsWith("127.")) || host.ips[0];
   };
 
-  const handleWol = async (mac, host) => {
-    const ip = getTargetIP(host);
-    if (!ip) {
-      appendLog(`❌ No valid IP for WOL on ${host.hostname}`);
-      return;
-    }
-    try {
-      appendLog(`💬 Sending WOL to ${host.hostname} (${ip})`);
-      await axios.post(`http://${ip}:9000/wol`, { mac });
-      appendLog(`✅ WOL sent to ${host.hostname}`);
-    } catch (err) {
-      let reason = err?.response?.data || err?.message || "Unknown error";
-      appendLog(`❌ WOL failed for ${host.hostname}: ${reason}`);
-    }
-  };
-
-  const handleStop = async (host, serviceName) => {
-    const ip = getTargetIP(host);
-    if (!ip) {
-      appendLog(`❌ No valid IP to stop ${serviceName} on ${host.hostname}`);
-      return;
-    }
-    try {
-      appendLog(`💬 Stopping service ${serviceName} on ${host.hostname}`);
-      await axios.post(`http://${ip}:9000/stop`, null, {
-        params: { name: serviceName }
-      });
-      appendLog(`✅ Stopped ${serviceName} on ${host.hostname}`);
-    } catch (err) {
-      let reason = err?.response?.data || err?.message || "Unknown error";
-      appendLog(`❌ Failed to stop ${serviceName} on ${host.hostname}: ${reason}`);
-    }
-  };
-
   const handleEdit = async (host, serviceName, field, value) => {
     const ip = getTargetIP(host);
-    if (!ip) {
-      appendLog(`❌ No valid IP to update config on ${host.hostname}`);
-      return;
-    }
+    if (!ip) return appendLog(`❌ No valid IP for ${host.hostname}`);
 
     dispatch({
       type: "UPDATE_SERVICE_FIELD",
-      payload: {
-        hostKey: host.hostname,
-        serviceName,
-        field,
-        value
-      }
+      payload: { hostKey: host.hostname, serviceName, field, value },
     });
 
     try {
       appendLog(`✏️ Updating ${field} for ${serviceName} on ${host.hostname} to "${value}"`);
-      await axios.post(`http://${ip}:9000/services`, {
-        name: serviceName,
-        [field]: value
-      });
+      await axios.post(`http://${ip}:9000/services`, { name: serviceName, [field]: value });
       appendLog(`✅ Updated ${field} for ${serviceName} on ${host.hostname}`);
+
+      if (field === "url") {
+        const key = `${host.hostname}-${serviceName}`;
+        setEditedUrls(prev => {
+          const newState = { ...prev };
+          delete newState[key];
+          return newState;
+        });
+      }
     } catch (err) {
-      let reason = err?.response?.data || err?.message || "Unknown error";
-      appendLog(`❌ Failed to update ${field} for ${serviceName} on ${host.hostname}: ${reason}`);
+      appendLog(`❌ Failed to update ${field}: ${err.message}`);
     }
   };
 
@@ -148,73 +122,49 @@ function App() {
           <div className="host-card fade-in" key={idx}>
             <div className="header">
               <h2>{host.name || host.hostname || `Host ${idx + 1}`}</h2>
-              {!host.connected && host.mac && (
-                <button
-                  className="wol-btn"
-                  onClick={() => handleWol(host.mac, host)}
-                  disabled={!host.mac}
-                >
-                  🔌 Wake
-                </button>
-              )}
             </div>
+
+            {/* DEBUG INFO */}
+            <p><strong>Host:</strong> {host.hostname}</p>
+            <p><strong>Connected:</strong> {String(host.connected)}</p>
+
             <p><strong>IPs:</strong> {host.ips?.join(", ") || "N/A"}</p>
-            <p><strong>RTT:</strong> <span>{host.lastRtt ?? "N/A"} ms</span></p>
-            <p><strong>Uptime:</strong> {host.uptime ?? "N/A"} s</p>
-            <p><strong>Version:</strong> {host.version ?? "Unknown"}</p>
             <p><strong>Status:</strong> {host.connected ? "🟢 Connected" : "🔴 Offline"}</p>
 
-            <h3>Services</h3>
-            <ul className="service-list" style={{ minHeight: "100px" }}>
-              {host.services
-                ? Object.entries(host.services).map(([svc, obj]) => (
-                    <li key={svc} className="service-entry">
-                      <strong>{svc}</strong>: {obj.running ? "🟢 Running" : "⚪ Stopped"}
-                      {obj.running && obj.pids?.length > 1 && (
-                        <p>PIDs: {obj.pids.join(", ")}</p>
-                      )}
-
-                      <p>
-                        URL:{" "}
-                        <input
-                          type="text"
-                          value={obj.url || ""}
-                          onChange={e =>
-                            handleEdit(host, svc, "url", e.target.value)
-                          }
-                        />
-                      </p>
-
-                      <label>
-                        Singleton:
-                        <input
-                          type="checkbox"
-                          checked={obj.singleton || false}
-                          onChange={e =>
-                            handleEdit(host, svc, "singleton", e.target.checked)
-                          }
-                        />
-                      </label>
-
-                      <button onClick={() => handleStop(host, svc)}>
-                        ⛔ Stop
-                      </button>
-                    </li>
-                  ))
-                : <li className="service-placeholder">No service info available.</li>}
-            </ul>
+            {host.services && (
+              <>
+                <h3>Services</h3>
+                <ul className="service-list">
+                  {Object.entries(host.services).map(([svc, obj]) => {
+                    const inputKey = `${host.hostname}-${svc}`;
+                    return (
+                      <li key={svc} className="service-entry">
+                        <strong>{svc}</strong>: {obj.running ? "🟢 Running" : "⚪ Stopped"}
+                        <p>
+                          URL: <input
+                            type="text"
+                            value={editedUrls[inputKey] ?? obj.url ?? ""}
+                            onChange={(e) => setEditedUrls(prev => ({ ...prev, [inputKey]: e.target.value }))}
+                            onBlur={(e) => handleEdit(host, svc, "url", e.target.value)}
+                          />
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </div>
         ))}
       </div>
-
       <div className="log">
-        <h3>Frontend Log</h3>
-        <ul className="log-list">
-          {log.map((entry, i) => (
-            <li key={i} className="log-entry fade-in">{entry}</li>
-          ))}
-        </ul>
-      </div>
+  <h3>Frontend Log</h3>
+  <ul className="log-list">
+    {log.map((entry, i) => (
+      <li key={i} className="log-entry fade-in">{entry}</li>
+    ))}
+  </ul>
+</div>
     </div>
   );
 }

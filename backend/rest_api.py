@@ -188,32 +188,39 @@ def monitor_services(interval=5):
             url = conf.get("url", "")
             singleton = conf.get("singleton", True)
             auto_restart = conf.get("auto_restart", True)
+            mode = conf.get("mode", "auto")
 
             if not url:
                 continue
 
-            running = False
+            running_pids = []
             for p in psutil.process_iter(["pid", "cmdline"]):
                 cmdline = p.info.get("cmdline") or []
                 if url in " ".join(cmdline):
-                    running = True
-                    break
+                    running_pids.append(p)
 
-            if not running:
+            if mode == "stopped" and running_pids:
+                for p in running_pids:
+                    try:
+                        print(f"[monitor] Stopping service '{name}' (pid {p.pid}) due to mode=stopped")
+                        p.terminate()
+                    except Exception as e:
+                        print(f"[monitor] Failed to stop pid {p.pid}: {e}")
+                continue
+
+            if not running_pids and mode != "stopped" and auto_restart:
                 print(f"[monitor] Detected stopped service '{name}'")
                 notify_helpers("startup")
-
-                if auto_restart:
-                    print(f"[monitor] Restarting service '{name}'")
-                    try:
-                        proc = subprocess.Popen(url, shell=True)
-                        pid = proc.pid
-                        ts = time.time()
-                        recent_starts.setdefault(name, {})[pid] = ts
-                        time.sleep(0.5)
-                        notify_helpers("startup")
-                    except Exception as e:
-                        print(f"[monitor] Failed to restart {name}: {e}")
+                print(f"[monitor] Restarting service '{name}'")
+                try:
+                    proc = subprocess.Popen(url, shell=True)
+                    pid = proc.pid
+                    ts = time.time()
+                    recent_starts.setdefault(name, {})[pid] = ts
+                    time.sleep(0.5)
+                    notify_helpers("startup")
+                except Exception as e:
+                    print(f"[monitor] Failed to restart {name}: {e}")
         time.sleep(interval)
 
 @app.get("/services")
@@ -238,6 +245,40 @@ def get_services():
             "singleton": conf.get("singleton", True),
             "running": len(pids) > 0,
             "pids": pids,
-            "lastStarted": last_started
+            "lastStarted": last_started,
+            "mode": conf.get("mode", "auto")
         }
     return result
+
+@app.post("/services")
+async def update_service(request: Request):
+    data = await request.json()
+    name = data.get("name")
+    field_updates = {k: v for k, v in data.items() if k != "name"}
+
+    if not name or name not in services:
+        return {"error": "Invalid service name"}
+
+    updated = False
+    for field, value in field_updates.items():
+        if services[name].get(field) != value:
+            services[name][field] = value
+            updated = True
+
+    if updated:
+        print(f"[update] {request.client.host} updated {name}: {field_updates}")
+        save_services()
+
+        # If mode is now 'stopped', kill running PIDs
+        if "mode" in field_updates and field_updates["mode"] == "stopped":
+            url = services[name].get("url")
+            if url:
+                for p in psutil.process_iter(["pid", "cmdline"]):
+                    if url in " ".join(p.info.get("cmdline") or []):
+                        try:
+                            print(f"[mode=stopped] Killing {name} pid {p.pid}")
+                            p.terminate()
+                        except Exception as e:
+                            print(f"[mode=stopped] Failed to kill pid {p.pid}: {e}")
+
+    return {"success": True}

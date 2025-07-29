@@ -269,16 +269,16 @@ async def update_service(request: Request):
         print(f"[update] {request.client.host} updated {name}: {field_updates}")
         save_services()
 
-        # If mode is now 'stopped', kill running PIDs
-        if "mode" in field_updates and field_updates["mode"] == "stopped":
-            url = services[name].get("url")
-            if url:
-                for p in psutil.process_iter(["pid", "cmdline"]):
-                    if url in " ".join(p.info.get("cmdline") or []):
-                        try:
-                            print(f"[mode=stopped] Killing {name} pid {p.pid}")
-                            p.terminate()
-                        except Exception as e:
-                            print(f"[mode=stopped] Failed to kill pid {p.pid}: {e}")
+        url = services[name].get("url")
+        if "mode" in field_updates and field_updates["mode"] == "stopped" and url:
+            for p in psutil.process_iter(["pid", "cmdline"]):
+                if url in " ".join(p.info.get("cmdline") or []):
+                    try:
+                        print(f"[mode=stopped] Killing {name} pid {p.pid}")
+                        p.terminate()
+                    except Exception as e:
+                        print(f"[mode=stopped] Failed to kill pid {p.pid}: {e}")
+
+        notify_helpers("startup")
 
     return {"success": True}

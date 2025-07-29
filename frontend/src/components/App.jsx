@@ -7,8 +7,11 @@ const machineReducer = (state, action) => {
   switch (action.type) {
     case "SET_MACHINES":
       return action.payload;
-    case "UPDATE_SERVICE_FIELD":
+    case "UPDATE_SERVICE_FIELD": {
       const { hostKey, serviceName, field, value } = action.payload;
+      const existing = state[hostKey]?.services?.[serviceName];
+      if (!existing) return state; // Prevent UI blank if service doesn't exist yet
+
       return {
         ...state,
         [hostKey]: {
@@ -16,12 +19,13 @@ const machineReducer = (state, action) => {
           services: {
             ...state[hostKey].services,
             [serviceName]: {
-              ...state[hostKey].services[serviceName],
+              ...existing,
               [field]: value
             }
           }
         }
       };
+    }
     default:
       return state;
   }
@@ -35,7 +39,7 @@ function App() {
 
   const appendLog = (msg) => {
     const timestamp = new Date().toLocaleTimeString();
-    setLog((prev) => [...prev, `[${timestamp}] ${msg}`]);
+    setLog((prev) => [...prev.slice(-100), `[${timestamp}] ${msg}`]);
   };
 
   const fetchData = async () => {
@@ -107,6 +111,7 @@ function App() {
         delete updated[key];
         return updated;
       });
+      await fetchData(); // force UI update after mode/url change
     } catch (err) {
       appendLog(`❌ Failed to update ${field}: ${err.message}`);
     }
@@ -118,6 +123,7 @@ function App() {
     try {
       await axios.post(`http://${ip}:9000/services/stop`, { name: serviceName, pid });
       appendLog(`🛑 Stopped PID ${pid} for ${serviceName} on ${host.hostname}`);
+      await fetchData();
     } catch (err) {
       appendLog(`❌ Failed to stop PID ${pid}: ${err.message}`);
     }
@@ -151,12 +157,8 @@ function App() {
               <ul className="service-list">
                 {Object.entries(host.services).map(([svc, obj]) => {
                   const inputKey = `${host.hostname}-${svc}`;
-                  const lastStartedDate = obj.lastStarted
-                    ? new Date(obj.lastStarted * 1000)
-                    : null;
-                  const secondsAgo = lastStartedDate
-                    ? Math.floor((Date.now() - lastStartedDate.getTime()) / 1000)
-                    : null;
+                  const last = obj.lastStarted ? Object.values(obj.lastStarted)[0] : null;
+                  const secondsAgo = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
                   const displayAgo = secondsAgo !== null && secondsAgo < 60 ? `${secondsAgo}s ago` : null;
 
                   return (
@@ -166,7 +168,7 @@ function App() {
                       {displayAgo && (
                         <span
                           className="last-started-label fade-out"
-                          title={`Restarted at ${lastStartedDate.toLocaleTimeString()}`}
+                          title={`Restarted at ${new Date(last).toLocaleTimeString()}`}
                         >
                           restarted {displayAgo}
                         </span>
@@ -190,9 +192,7 @@ function App() {
                           onChange={(e) =>
                             setEditedUrls((prev) => ({ ...prev, [inputKey]: e.target.value }))
                           }
-                          onBlur={(e) =>
-                            handleEdit(host, svc, "url", e.target.value)
-                          }
+                          onBlur={(e) => handleEdit(host, svc, "url", e.target.value)}
                         />
                       </div>
 

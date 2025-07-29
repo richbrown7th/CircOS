@@ -2,6 +2,6 @@
   "vkCube": {
     "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
     "singleton": true,
-    "mode": "stopped"
+    "mode": "auto"
   }
 }

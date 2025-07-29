@@ -5,12 +5,33 @@ import "./App.css";
 
 const machineReducer = (state, action) => {
   switch (action.type) {
-    case "SET_MACHINES":
-      return action.payload;
+    case "SET_MACHINES": {
+      const merged = { ...state };
+      for (const [hostKey, newHost] of Object.entries(action.payload)) {
+        const oldHost = state[hostKey];
+        if (!oldHost) {
+          merged[hostKey] = newHost;
+        } else {
+          const updatedServices = { ...oldHost.services };
+          for (const [svcName, newSvc] of Object.entries(newHost.services || {})) {
+            updatedServices[svcName] = {
+              ...updatedServices[svcName],
+              ...newSvc
+            };
+          }
+          merged[hostKey] = {
+            ...oldHost,
+            ...newHost,
+            services: updatedServices
+          };
+        }
+      }
+      return merged;
+    }
     case "UPDATE_SERVICE_FIELD": {
       const { hostKey, serviceName, field, value } = action.payload;
       const existing = state[hostKey]?.services?.[serviceName];
-      if (!existing) return state; // Prevent UI blank if service doesn't exist yet
+      if (!existing) return state;
 
       return {
         ...state,
@@ -94,24 +115,25 @@ function App() {
 
   const handleEdit = async (host, serviceName, field, value) => {
     const ip = getTargetIP(host);
-    if (!ip) return appendLog(`❌ No valid IP for ${host.hostname}`);
+    const hostKey = host.hostname || host.name || host.address || ip;
+    console.log(`[DEBUG] Target IP for ${hostKey} is ${ip}`);
+    if (!ip) return appendLog(`❌ No valid IP for ${hostKey}`);
 
     dispatch({
       type: "UPDATE_SERVICE_FIELD",
-      payload: { hostKey: host.hostname, serviceName, field, value }
+      payload: { hostKey, serviceName, field, value }
     });
 
     try {
-      appendLog(`✏️ Updating ${field} for ${serviceName} on ${host.hostname} to "${value}"`);
+      appendLog(`✏️ Updating ${field} for ${serviceName} on ${hostKey} to "${value}"`);
       await axios.post(`http://${ip}:9000/services`, { name: serviceName, [field]: value });
-      appendLog(`✅ Updated ${field} for ${serviceName} on ${host.hostname}`);
-      const key = `${host.hostname}-${serviceName}`;
+      appendLog(`✅ Updated ${field} for ${serviceName} on ${hostKey}`);
+      const key = `${hostKey}-${serviceName}`;
       setEditedUrls((prev) => {
         const updated = { ...prev };
         delete updated[key];
         return updated;
       });
-      await fetchData(); // force UI update after mode/url change
     } catch (err) {
       appendLog(`❌ Failed to update ${field}: ${err.message}`);
     }
@@ -156,7 +178,7 @@ function App() {
             {host.services && (
               <ul className="service-list">
                 {Object.entries(host.services).map(([svc, obj]) => {
-                  const inputKey = `${host.hostname}-${svc}`;
+                  const inputKey = `${key}-${svc}`;
                   const last = obj.lastStarted ? Object.values(obj.lastStarted)[0] : null;
                   const secondsAgo = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
                   const displayAgo = secondsAgo !== null && secondsAgo < 60 ? `${secondsAgo}s ago` : null;

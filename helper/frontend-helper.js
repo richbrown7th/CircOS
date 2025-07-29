@@ -11,9 +11,9 @@ const bonjour = Bonjour();
 const app = express();
 const PORT = 8800;
 const CACHE_FILE = './machine_cache.json';
+const STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 let machineCache = {};
 
-// Get external IP address (non-loopback)
 function getLocalExternalIP() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
@@ -34,6 +34,11 @@ function isUsableIP(ip) {
   return ip && !isLoopback(ip);
 }
 
+function isStale(ip, cache) {
+  const lastSeen = cache.lastSeen ? new Date(cache.lastSeen).getTime() : 0;
+  return Date.now() - lastSeen > STALE_TIMEOUT_MS;
+}
+
 async function resolveIPv4PreferNonLoopback(hostname) {
   try {
     const res = await dns.lookup(hostname, { all: true, family: 4 });
@@ -49,30 +54,31 @@ function saveCache() {
   fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
 }
 
-function mergeDuplicateMachines(newIp, newHostname) {
-  if (!newHostname) return;
+function mergeDuplicateMachines(currentIP, currentHostname) {
+  if (!currentHostname) return;
 
-  for (const [existingIp, data] of Object.entries(machineCache)) {
-    if (existingIp !== newIp && (data.hostname || data.name) === newHostname) {
-      console.log(`[DEDUPE] Merging ${newIp} with ${existingIp} (hostname: ${newHostname})`);
+  const candidates = Object.entries(machineCache).filter(
+    ([ip, data]) => ip !== currentIP && (data.hostname || data.name) === currentHostname
+  );
 
-      const merged = {
-        ...data,
-        ...machineCache[newIp],
-        address: newIp,
-        hostname: newHostname,
-        ips: Array.from(new Set([...(data.ips || [existingIp]), ...(machineCache[newIp].ips || [newIp])])),
-      };
+  for (const [ip, data] of candidates) {
+    console.log(`[DEDUPE] Merging ${currentIP} with ${ip} (hostname: ${currentHostname})`);
 
-      if (new Date(machineCache[newIp].lastSeen || 0) > new Date(data.lastSeen || 0)) {
-        Object.assign(merged, machineCache[newIp]);
-      }
+    const winner = new Date(machineCache[currentIP].lastSuccess || 0) > new Date(data.lastSuccess || 0)
+      ? machineCache[currentIP] : data;
 
-      machineCache[newIp] = merged;
-      delete machineCache[existingIp];
-      saveCache();
-      break;
-    }
+    const merged = {
+      ...data,
+      ...machineCache[currentIP],
+      ...winner,
+      address: currentIP,
+      hostname: currentHostname,
+      ips: Array.from(new Set([...(data.ips || [ip]), ...(machineCache[currentIP].ips || [currentIP])]))
+    };
+
+    machineCache[currentIP] = merged;
+    delete machineCache[ip];
+    saveCache();
   }
 }
 
@@ -108,6 +114,25 @@ async function updatePings(source = "scheduler") {
     const now = new Date().toISOString();
     let cache = machineCache[ip];
 
+    if (!cache) continue;
+
+    if (isStale(ip, cache)) {
+      try {
+        const res = await ping.promise.probe(ip);
+        if (!res.alive) {
+          console.warn(`[CLEANUP] Removing unreachable stale IP ${ip}`);
+          delete machineCache[ip];
+          updated = true;
+          continue;
+        }
+      } catch {
+        console.warn(`[CLEANUP] Timeout while probing stale IP ${ip}, removing`);
+        delete machineCache[ip];
+        updated = true;
+        continue;
+      }
+    }
+
     if (!cache.connected) {
       const refreshedIP = await tryUpdateCachedIP(ip, cache);
       if (refreshedIP !== ip) {
@@ -129,6 +154,7 @@ async function updatePings(source = "scheduler") {
         const info = pingRes.data;
 
         cache.lastSeen = now;
+        cache.lastSuccess = now;
         cache.uptime = info.uptime ?? null;
         cache.hostname = info.hostname ?? null;
         cache.version = info.version ?? null;

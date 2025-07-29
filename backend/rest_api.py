@@ -250,6 +250,10 @@ def get_services():
         }
     return result
 
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+
 @app.post("/services")
 async def update_service(request: Request):
     data = await request.json()
@@ -271,14 +275,25 @@ async def update_service(request: Request):
 
         url = services[name].get("url")
         if "mode" in field_updates and field_updates["mode"] == "stopped" and url:
-            for p in psutil.process_iter(["pid", "cmdline"]):
-                if url in " ".join(p.info.get("cmdline") or []):
-                    try:
+            import os
+            killed = False
+            for p in psutil.process_iter(["pid", "cmdline", "exe"]):
+                try:
+                    cmdline = p.info.get("cmdline") or []
+                    exe_path = p.info.get("exe") or ""
+                    cmdline_str = " ".join(cmdline)
+
+                    if url in cmdline_str or url in exe_path or os.path.basename(url) in cmdline_str:
                         print(f"[mode=stopped] Killing {name} pid {p.pid}")
                         p.terminate()
-                    except Exception as e:
-                        print(f"[mode=stopped] Failed to kill pid {p.pid}: {e}")
+                        killed = True
+                except Exception as e:
+                    print(f"[mode=stopped] Failed to inspect or kill pid {p.pid}: {e}")
+
+            if not killed:
+                print(f"[mode=stopped] No matching process found for {name} with URL: {url}")
 
         notify_helpers("startup")
 
     return {"success": True}
+            

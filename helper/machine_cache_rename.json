@@ -1,0 +1,89 @@
+{
+  "10.199.0.99": {
+    "name": "HH349RLPCG-191.local",
+    "address": "10.199.0.99",
+    "port": 9000,
+    "lastSeen": "2025-07-28T18:54:33.837Z",
+    "lastPing": "2025-07-29T05:40:45.181Z",
+    "lastRtt": 98.224,
+    "uptime": 11191,
+    "hostname": "HH349RLPCG-100.local",
+    "version": "v1.3.0",
+    "pingHistory": [
+      "2025-07-29T05:03:02.078Z",
+      "2025-07-29T05:04:02.058Z",
+      "2025-07-29T05:05:02.053Z",
+      "2025-07-29T05:06:02.056Z",
+      "2025-07-29T05:07:02.056Z",
+      "2025-07-29T05:22:01.320Z",
+      "2025-07-29T05:24:57.898Z",
+      "2025-07-29T05:25:57.900Z",
+      "2025-07-29T05:39:45.184Z",
+      "2025-07-29T05:40:45.181Z"
+    ],
+    "services": {
+      "vkCube": {
+        "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
+        "singleton": true,
+        "running": true,
+        "pids": [
+          57886
+        ],
+        "lastStarted": {}
+      }
+    },
+    "connected": true
+  },
+  "192.168.1.101": {
+    "name": "Manual Machine A",
+    "address": "192.168.1.101",
+    "port": 9000,
+    "lastSeen": "2025-07-28T15:41:51.761Z",
+    "lastPing": "2025-07-29T05:40:45.308Z",
+    "lastRtt": "unknown",
+    "uptime": null,
+    "hostname": null,
+    "version": null,
+    "pingHistory": [
+      "2025-07-29T05:03:02.658Z",
+      "2025-07-29T05:04:02.347Z",
+      "2025-07-29T05:05:02.183Z",
+      "2025-07-29T05:06:02.746Z",
+      "2025-07-29T05:07:04.180Z",
+      "2025-07-29T05:22:07.356Z",
+      "2025-07-29T05:25:09.052Z",
+      "2025-07-29T05:26:08.919Z",
+      "2025-07-29T05:39:50.325Z",
+      "2025-07-29T05:40:45.308Z"
+    ],
+    "services": null,
+    "connected": false
+  },
+  "127.0.0.1": {
+    "name": "HH349RLPCG-191",
+    "address": "127.0.0.1",
+    "port": 9000,
+    "lastSeen": "2025-07-29T05:39:46.049Z",
+    "lastPing": "2025-07-29T05:40:50.320Z",
+    "lastRtt": 0.107,
+    "uptime": null,
+    "hostname": null,
+    "version": null,
+    "pingHistory": [
+      "2025-07-29T05:39:56.340Z",
+      "2025-07-29T05:40:50.320Z"
+    ],
+    "services": {
+      "vkCube": {
+        "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
+        "singleton": true,
+        "running": true,
+        "pids": [
+          57886
+        ],
+        "lastStarted": {}
+      }
+    },
+    "connected": true
+  }
+}

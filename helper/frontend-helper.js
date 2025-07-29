@@ -5,6 +5,7 @@ const ping = require('ping');
 const Bonjour = require('bonjour');
 const axios = require('axios');
 const dns = require('dns').promises;
+const os = require('os');
 
 const bonjour = Bonjour();
 const app = express();
@@ -12,47 +13,19 @@ const PORT = 8800;
 const CACHE_FILE = './machine_cache.json';
 let machineCache = {};
 
-// Publish presence for mDNS discovery
-bonjour.publish({
-  name: "CircOS Helper",
-  type: "circos-helper",
-  port: PORT
-});
-
-// Load existing cache
-if (fs.existsSync(CACHE_FILE)) {
-  try {
-    const raw = fs.readFileSync(CACHE_FILE, 'utf8');
-    machineCache = raw.trim() ? JSON.parse(raw) : {};
-  } catch {
-    machineCache = {};
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+// Get external IP address (non-loopback)
+function getLocalExternalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
   }
-} else {
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  return '127.0.0.1';
 }
 
-// mDNS discovery
-bonjour.find({ type: 'circos' }, service => {
-  const ip = service.referer?.address || 'unknown';
-  machineCache[ip] = {
-    name: service.name || 'Unnamed',
-    address: ip,
-    port: service.port || 9000,
-    lastSeen: new Date().toISOString(),
-    lastPing: null,
-    lastRtt: null,
-    uptime: null,
-    hostname: null,
-    version: null,
-    pingHistory: [],
-    services: null,
-    connected: true,
-  };
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
-});
-
-// === UTILITIES ===
 function isLoopback(ip) {
   return ip.startsWith('127.') || ip === '::1';
 }
@@ -72,6 +45,37 @@ async function resolveIPv4PreferNonLoopback(hostname) {
   }
 }
 
+function saveCache() {
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+}
+
+function mergeDuplicateMachines(newIp, newHostname) {
+  if (!newHostname) return;
+
+  for (const [existingIp, data] of Object.entries(machineCache)) {
+    if (existingIp !== newIp && (data.hostname || data.name) === newHostname) {
+      console.log(`[DEDUPE] Merging ${newIp} with ${existingIp} (hostname: ${newHostname})`);
+
+      const merged = {
+        ...data,
+        ...machineCache[newIp],
+        address: newIp,
+        hostname: newHostname,
+        ips: Array.from(new Set([...(data.ips || [existingIp]), ...(machineCache[newIp].ips || [newIp])])),
+      };
+
+      if (new Date(machineCache[newIp].lastSeen || 0) > new Date(data.lastSeen || 0)) {
+        Object.assign(merged, machineCache[newIp]);
+      }
+
+      machineCache[newIp] = merged;
+      delete machineCache[existingIp];
+      saveCache();
+      break;
+    }
+  }
+}
+
 async function tryUpdateCachedIP(ip, cache) {
   const host = cache.hostname || cache.name;
   if (!host || !host.endsWith('.local') || cache.name === 'Manual') return ip;
@@ -80,20 +84,17 @@ async function tryUpdateCachedIP(ip, cache) {
   if (newIP && newIP !== ip) {
     console.log(`[IP-REFRESH] IP for ${host} changed from ${ip} to ${newIP}`);
     machineCache[newIP] = { ...cache, address: newIP };
-
     if (isLoopback(ip)) {
       delete machineCache[ip];
       console.log(`[IP-REFRESH] Removed loopback cache entry for ${ip}`);
     }
-
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+    saveCache();
     return newIP;
   }
 
   return ip;
 }
 
-// === CORE: Ping and Fetch Info ===
 async function updatePings(source = "scheduler") {
   const ips = Object.keys(machineCache);
   if (!ips.length) return;
@@ -102,6 +103,8 @@ async function updatePings(source = "scheduler") {
   let updated = false;
 
   for (let ip of ips) {
+    if (isLoopback(ip)) continue;
+
     const now = new Date().toISOString();
     let cache = machineCache[ip];
 
@@ -129,6 +132,7 @@ async function updatePings(source = "scheduler") {
         cache.uptime = info.uptime ?? null;
         cache.hostname = info.hostname ?? null;
         cache.version = info.version ?? null;
+        mergeDuplicateMachines(ip, cache.hostname);
       } catch (e) {
         console.warn(`[PING] /ping failed for ${ip}: ${e.message}`);
       }
@@ -149,14 +153,51 @@ async function updatePings(source = "scheduler") {
     }
   }
 
-  if (updated) {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  if (updated) saveCache();
+}
+
+bonjour.publish({
+  name: "CircOS Helper",
+  type: "circos-helper",
+  port: PORT
+});
+
+bonjour.find({ type: 'circos' }, service => {
+  const ip = service.referer?.address || 'unknown';
+  if (isLoopback(ip)) return;
+
+  machineCache[ip] = {
+    name: service.name || 'Unnamed',
+    address: ip,
+    port: service.port || 9000,
+    lastSeen: new Date().toISOString(),
+    lastPing: null,
+    lastRtt: null,
+    uptime: null,
+    hostname: null,
+    version: null,
+    pingHistory: [],
+    services: null,
+    connected: true,
+  };
+  mergeDuplicateMachines(ip, service.name || null);
+  saveCache();
+});
+
+if (fs.existsSync(CACHE_FILE)) {
+  try {
+    const raw = fs.readFileSync(CACHE_FILE, 'utf8');
+    machineCache = raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    machineCache = {};
+    saveCache();
   }
+} else {
+  saveCache();
 }
 
 setInterval(() => updatePings("interval"), 60_000);
 
-// === API ===
 app.use(cors());
 app.use(express.json());
 
@@ -166,7 +207,7 @@ app.get('/cache', (req, res) => {
 
 app.post('/cache', (req, res) => {
   const { address, name, port } = req.body;
-  if (!address) return res.status(400).json({ error: 'Address required' });
+  if (!address || isLoopback(address)) return res.status(400).json({ error: 'Valid address required' });
 
   machineCache[address] = {
     name: name || 'Manual',
@@ -183,7 +224,7 @@ app.post('/cache', (req, res) => {
     connected: true,
   };
 
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  saveCache();
   res.json({ success: true });
 });
 
@@ -194,10 +235,16 @@ app.post('/refresh', async (req, res) => {
 });
 
 app.post('/notify-startup', async (req, res) => {
-  const { ip, name, port } = req.body;
+  let { ip, name, port } = req.body;
   if (!ip) return res.status(400).json({ error: "Missing IP" });
 
+  if (isLoopback(ip)) {
+    ip = getLocalExternalIP();
+    console.log(`[STARTUP] Replaced loopback with ${ip}`);
+  }
+
   console.log(`[STARTUP] Backend at ${ip} startup notification`);
+
   machineCache[ip] = {
     ...(machineCache[ip] || {}),
     name: name || machineCache[ip]?.name || "Manual",
@@ -208,7 +255,7 @@ app.post('/notify-startup', async (req, res) => {
   };
 
   await updatePings(`notify-startup-${ip}`);
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+  saveCache();
   res.json({ success: true });
 });
 
@@ -220,7 +267,7 @@ app.post('/notify-shutdown', (req, res) => {
   if (machineCache[ip]) {
     machineCache[ip].connected = false;
     machineCache[ip].services = null;
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(machineCache, null, 2));
+    saveCache();
     setTimeout(() => updatePings(`notify-shutdown-${ip}`), 100);
   }
 
@@ -229,5 +276,5 @@ app.post('/notify-shutdown', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[helper] Listening at http://0.0.0.0:${PORT}`);
-  updatePings("startup");  // immediate startup ping
+  updatePings("startup");
 });

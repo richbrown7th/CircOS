@@ -1,0 +1,32 @@
+{
+  "127.0.0.1": {
+    "name": "HH349RLPCG-350",
+    "address": "127.0.0.1",
+    "port": 9000,
+    "lastSeen": "2025-07-29T06:45:01.184Z",
+    "lastPing": "2025-07-29T08:39:25.231Z",
+    "lastRtt": 0.086,
+    "uptime": null,
+    "hostname": null,
+    "version": null,
+    "pingHistory": [
+      "2025-07-29T08:37:59.807Z",
+      "2025-07-29T08:38:59.801Z",
+      "2025-07-29T08:39:25.231Z"
+    ],
+    "services": {
+      "vkCube": {
+        "url": "/Applications/vkcube.app/Contents/MacOS/vkCube",
+        "singleton": true,
+        "running": true,
+        "pids": [
+          14921
+        ],
+        "lastStarted": {
+          "14921": "2025-07-29T08:37:48.623051Z"
+        }
+      }
+    },
+    "connected": true
+  }
+}
